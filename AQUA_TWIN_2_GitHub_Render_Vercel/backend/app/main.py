@@ -97,8 +97,17 @@ async def report(req:ReportRequest):
                                                   'HTTP-Referer':os.environ.get('SITE_URL','http://localhost:5173'),
                                                   'X-Title':'AQUA TWIN'},
                                          json={'model':model,'messages':[{'role':'user','content':prompt}],
-                                               'max_tokens':650})
+                                               'max_tokens':2000,
+                                               # 추론형 모델이 토큰을 생각에만 다 써서 본문이 null이 되는 것 방지
+                                               'reasoning':{'effort':'low','exclude':True}})
             response.raise_for_status()
-            return {'text':response.json()['choices'][0]['message']['content'],'mode':'openrouter'}
+            data = response.json()
+            message = (data.get('choices') or [{}])[0].get('message') or {}
+            text = (message.get('content') or '').strip()
+            if not text:
+                used = data.get('model', model)
+                return {'text':fallback+f' (외부 AI({used})가 빈 응답을 보내 오프라인 분석을 표시합니다. '
+                                        'Render의 OPENROUTER_MODEL을 다른 모델로 바꿔 보세요.)','mode':'offline'}
+            return {'text':text,'mode':'openrouter'}
     except Exception:
         return {'text':fallback+' (외부 AI 요청 실패로 오프라인 분석을 표시합니다.)','mode':'offline'}
