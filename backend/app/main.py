@@ -10,20 +10,22 @@ from pydantic import BaseModel, Field
 from .simulation import (BUILDINGS, ROOMS, ROOM_IDS, LINKS, EVENTS, STRATEGIES,
                          procedural_events, validate_events, simulate, observed_sensors)
 from .ml import diagnose, get_model
+from .command import run_mission, benchmark, ACTIONS
 
-app=FastAPI(title='AQUA TWIN Autonomous Incident Director',version='5.0.0')
+app=FastAPI(title='AQUA TWIN Autonomous Incident Director',version='8.0.0')
 origins=[v.strip().rstrip('/') for v in os.getenv('ALLOWED_ORIGINS','http://localhost:5173').split(',') if v.strip()]
 app.add_middleware(CORSMiddleware,allow_origins=origins,allow_methods=['GET','POST'],allow_headers=['Content-Type'])
 
 @app.get('/api/health')
-def health():return {'ok':True,'version':'5.0.0'}
+def health():return {'ok':True,'version':'8.0.0'}
 
 @app.get('/api/config')
 def config():
     return {'buildings':[{'id':a,'name':b} for a,b in BUILDINGS],
             'rooms':ROOMS,'links':LINKS,
             'event_types':{k:{'name':v[0],'emoji':v[1],'response':v[2]} for k,v in EVENTS.items()},
-            'strategies':STRATEGIES,'max_events':7,'steps':30}
+            'strategies':STRATEGIES,'max_events':7,'steps':30,
+            'actions':{k:{'name':v['label'],'cost':v['cost']} for k,v in ACTIONS.items()}}
 
 @app.get('/api/model')
 def model_info():return {'evaluation':get_model()['evaluation'],'source':'synthetic'}
@@ -154,3 +156,26 @@ async def report(req:ReportRequest):
             return {'text':content,'mode':'openrouter'}
     except (httpx.HTTPError,ValueError,KeyError,IndexError,TypeError):
         return {'text':fallback,'mode':'offline'}
+
+
+@app.post('/api/mission')
+def mission(req: SimulateRequest):
+    """Execute AI, rule-based, and no-response policies on the exact same incidents."""
+    try:
+        events=validate_events(req.events,steps=30)
+        for src,dst in zip(req.events,events):
+            duration=src.get('duration',10)
+            if type(duration) is not int or not 1<=duration<=30:
+                raise ValueError('invalid duration')
+            dst['duration']=duration
+    except (ValueError,TypeError) as exc:
+        raise HTTPException(status_code=422,detail=str(exc)) from exc
+    result=run_mission(events,req.seed)
+    result['events']=decorate_events(events)
+    return result
+
+@app.get('/api/benchmark')
+def compare_benchmark(runs:int=6, seed:int=2026):
+    if not 3<=runs<=12 or not 0<=seed<=2_147_483_647:
+        raise HTTPException(status_code=422,detail='runs must be 3..12')
+    return benchmark(range(seed,seed+runs),lambda s:procedural_events(s,steps=30))

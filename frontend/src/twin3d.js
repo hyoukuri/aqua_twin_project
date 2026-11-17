@@ -32,17 +32,17 @@ export function createTwin(container,config,onSelect){
   renderer.setClearColor(OCEAN,1);container.appendChild(renderer.domElement);
   const scene=new THREE.Scene();scene.background=new THREE.Color(OCEAN);
   scene.fog=new THREE.FogExp2(0x082537,.019);
-  const camera=new THREE.PerspectiveCamera(43,1,.1,160);camera.position.set(14,24,33);
+  const camera=new THREE.PerspectiveCamera(43,1,.1,160);camera.position.set(16,26,36);
   const controls=new OrbitControls(camera,renderer.domElement);
   controls.enableDamping=true;controls.dampingFactor=.065;controls.minDistance=6;controls.maxDistance=70;
-  controls.maxPolarAngle=Math.PI*.485;controls.target.set(11.6,0,3.1);
-  const homeTarget=new THREE.Vector3(11.6,0,3.1),targetPosition=new THREE.Vector3();
+  controls.maxPolarAngle=Math.PI*.485;controls.target.set(12.4,0,3.5);
+  const homeTarget=new THREE.Vector3(12.4,0,3.5),targetPosition=new THREE.Vector3();
   let focusing=false;
   scene.add(new THREE.HemisphereLight(0x7bd7ee,0x102538,2.25));
   const key=new THREE.DirectionalLight(0xd6f6ff,2.8);key.position.set(-9,22,13);scene.add(key);
   const fill=new THREE.DirectionalLight(0x1d9dbb,1.2);fill.position.set(22,9,-16);scene.add(fill);
   // Uneven seabed, not a CAD grid. A faint platform grid is drawn above it.
-  const terrainGeo=new THREE.PlaneGeometry(45,26,65,36);
+  const terrainGeo=new THREE.PlaneGeometry(49,29,65,36);
   terrainGeo.rotateX(-Math.PI/2);
   const attr=terrainGeo.attributes.position;
   for(let i=0;i<attr.count;i++){
@@ -50,9 +50,9 @@ export function createTwin(container,config,onSelect){
     attr.setY(i,-1.25+Math.sin(x*.48)*.14+Math.cos(z*.55)*.11+Math.sin((x+z)*.28)*.12);
   }
   terrainGeo.computeVertexNormals();
-  mesh(terrainGeo,mat(0x102c38,.03,.95),scene,11.6,0,3.1);
-  const guide=new THREE.GridHelper(37,37,0x265364,0x173b4b);
-  guide.position.set(11.6,-.93,3.1);guide.material.transparent=true;guide.material.opacity=.29;scene.add(guide);
+  mesh(terrainGeo,mat(0x102c38,.03,.95),scene,12.4,0,3.5);
+  const guide=new THREE.GridHelper(42,42,0x265364,0x173b4b);
+  guide.position.set(12.4,-.93,3.5);guide.material.transparent=true;guide.material.opacity=.29;scene.add(guide);
   const rockMat=mat(0x294650,.08,.95), rockGeo=new THREE.DodecahedronGeometry(1,0);
   for(let i=0;i<85;i++){
     const x=-8+rand(i*13+1)*40,z=-8+rand(i*13+2)*23;
@@ -144,7 +144,10 @@ export function createTwin(container,config,onSelect){
     const water=mesh(new THREE.CylinderGeometry(.51,.51,.018,20),new THREE.MeshBasicMaterial({color:0x298fe8,transparent:true,opacity:.62,depthWrite:false}),g,0,-.38,0);
     const selection=mesh(new THREE.TorusGeometry(.97,.045,8,48),new THREE.MeshBasicMaterial({color:0xffd685,transparent:true,opacity:0,depthWrite:false}),g,0,-.48,0);selection.rotation.x=Math.PI/2;
     const alarm=mesh(new THREE.RingGeometry(.98,1.11,40),new THREE.MeshBasicMaterial({color:RED,side:THREE.DoubleSide,transparent:true,opacity:0,depthWrite:false}),g,0,-.47,0);alarm.rotation.x=-Math.PI/2;
-    modules[id]={g,status,beacon,water,selection,alarm,statusMat,halo,body,risk:0};
+    // Incident column provides spatial location cues without a full-screen effect.
+    const beam=mesh(new THREE.CylinderGeometry(.08,.42,2.7,12,1,true),new THREE.MeshBasicMaterial({color:0xffb65e,transparent:true,opacity:0,depthWrite:false,side:THREE.DoubleSide}),g,0,1.5,0);
+    const beaconLight=new THREE.PointLight(0xffa962,0,3.2,2);beaconLight.position.set(0,1.0,0);g.add(beaconLight);
+    modules[id]={g,status,beacon,water,selection,alarm,beam,beaconLight,statusMat,halo,body,risk:0};
     if(variant===2){
       const tag=label(r.building_id,true);tag.position.set(0,2.05,0);g.add(tag);
       buildings[r.building_id]=g;
@@ -161,6 +164,8 @@ export function createTwin(container,config,onSelect){
       m.statusMat.color.setHex(color);
       m.statusMat.emissive.setHex(risk>=20?0xe13558:risk>=8||preview&&frameMinute===null?0xb27a24:0x0b9e99);
       m.alarm.material.opacity=active?.32:risk>=20?.18:preview&&frameMinute===null?.15:0;
+      m.beam.material.opacity=active?.14:preview&&frameMinute===null?.07:0;
+      m.beaconLight.intensity=active?1.0:0;
     }
   }
   function setScenario(next){events=Array.isArray(next)?next:[];frameMinute=null;for(const m of Object.values(modules)){m.risk=0;m.water.scale.y=1;m.water.position.y=-.38;}updateVisuals();}
@@ -191,7 +196,7 @@ export function createTwin(container,config,onSelect){
   renderer.domElement.addEventListener('pointerdown',down);
   renderer.domElement.addEventListener('pointerup',up);
   controls.addEventListener('start',()=>{focusing=false;});
-  const resetCamera=()=>{focusing=false;controls.target.copy(homeTarget);camera.position.set(14,24,33);controls.update();};
+  const resetCamera=()=>{focusing=false;controls.target.copy(homeTarget);camera.position.set(16,26,36);controls.update();};
   // Double click empty space to return to whole-base view.
   renderer.domElement.addEventListener('dblclick',resetCamera);
   function resize(){const w=Math.max(280,container.clientWidth),h=Math.max(280,container.clientHeight);renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
@@ -209,7 +214,10 @@ export function createTwin(container,config,onSelect){
     }
     for(const [id,m] of Object.entries(modules)){
       const active=frameMinute!==null&&events.some(e=>e.room===id&&frameMinute>=e.start&&frameMinute<e.start+e.duration);
-      if(active)m.alarm.material.opacity=.23+.22*(.5+.5*Math.sin(elapsed*5));
+      if(active){m.alarm.material.opacity=.23+.22*(.5+.5*Math.sin(elapsed*5));
+        m.beam.material.opacity=.11+.08*(.5+.5*Math.sin(elapsed*3.7));
+        m.beaconLight.intensity=.8+.5*Math.sin(elapsed*4);
+      }
       if(id===selected)m.selection.material.opacity=.65+.30*(.5+.5*Math.sin(elapsed*2.5));
     }
     controls.update();renderer.render(scene,camera);

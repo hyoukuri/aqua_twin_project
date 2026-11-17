@@ -27,7 +27,8 @@ for i,(bid,bname) in enumerate(BUILDINGS):
     for j,name in enumerate(ROOM_NAMES[i]):
         rid=f'{bid}-{j+1}'
         ROOMS[rid]={'id':rid,'name':name,'building_id':bid,'building':bname,
-                    'x':(i%5)*5.8+(j-1)*1.25,'z':(i//5)*6.2}
+                    'x':(i%5)*5.8+(1.5 if i>=5 else 0)+(-1.3 if j==0 else 1.3 if j==2 else 0),
+                    'z':(i//5)*7.1+(.6 if i%2==0 else -.4)+(-.65 if j!=1 else .4)}
 ROOM_IDS=list(ROOMS)
 LINKS=[]
 for bid,_ in BUILDINGS:

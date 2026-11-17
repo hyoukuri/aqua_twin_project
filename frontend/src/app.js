@@ -1,191 +1,151 @@
 import './style.css';
 import { createTwin } from './twin3d.js';
-const API=(import.meta.env.VITE_API_URL||'http://localhost:8000').replace(/\/$/,'');
+const API=(import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/,'');
 const $=id=>document.getElementById(id);
-const LABELS={water:'침수',power:'전력',oxygen:'산소',temperature:'온도',pressure:'압력',air_quality:'공기 질',integrity:'구조 건전성',comms:'통신'};
-let config=null,result=null,scenario=null,twin=null,selected='B01-2',minute=0,playTimer=null;
-function setStatus(message,good=true){$('status').textContent=message;$('status').classList.toggle('bad',!good);}
-function error(message){$('error').textContent=message;$('error').classList.remove('hidden');setStatus('연결 오류',false);}
-function clearError(){$('error').classList.add('hidden');}
-async function request(path,body){const r=await fetch(API+path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json'},...(body!==undefined?{body:JSON.stringify(body)}:{})});if(!r.ok)throw Error(`${path}: HTTP ${r.status}`);return r.json();}
-function el(tag,className,text){const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;}
-function fmtTime(t){return `${String(t).padStart(2,'0')}:00`;}
-function eventLabel(event){return `${event.emoji} ${event.name}`;}
-function createEventRow(event,compact=false){
-  const node=el('div',compact?'side-event':'event-item');
-  const head=el('div','event-top');head.append(el('strong','',eventLabel(event)),el('span','event-time',`T+${event.start}분`));node.append(head);
-  node.append(el('div','event-location',`${event.building} · ${event.room_name}`));
-  const footer=el('div','event-footer');footer.append(el('span','',`강도 ${'●'.repeat(event.severity)}${'○'.repeat(5-event.severity)}`));
-  if(!compact)footer.append(el('span','',`지속 ${event.duration}분`));node.append(footer);
-  node.addEventListener('click',()=>{selected=event.room;twin?.setSelected(selected);showRoom();});return node;
+const names={water:'침수',power:'전력',oxygen:'산소',temperature:'온도',pressure:'압력',air_quality:'공기 질',integrity:'구조 건전성',comms:'통신'};
+const policyNames={ml:'AI 지휘',rules:'규칙 기반',none:'무대응'};
+let config=null,scenario=null,mission=null,twin=null,minute=0,policy='ml',selected='B01-2',timer=null,loading=false;
+const text=(tag,value,className='')=>{const e=document.createElement(tag);e.textContent=String(value);if(className)e.className=className;return e;};
+function clear(node){node.replaceChildren();}
+function status(message,good=true){$('status').replaceChildren(text('span','','mini-led'),document.createTextNode(' '+message));$('status').classList.toggle('bad',!good);}
+function showError(message){$('error').textContent=message;$('error').classList.remove('hidden');status('연결 확인 필요',false);}
+function hideError(){$('error').classList.add('hidden');}
+async function api(path,data){
+  const ctrl=new AbortController(),id=setTimeout(()=>ctrl.abort(),90000);
+  try{
+    const response=await fetch(API+path,{method:data===undefined?'GET':'POST',headers:{'Content-Type':'application/json'},signal:ctrl.signal,...(data===undefined?{}:{body:JSON.stringify(data)})});
+    if(!response.ok){let detail='';try{const body=await response.json();detail=typeof body.detail==='string'?body.detail:JSON.stringify(body.detail||'');}catch{}throw new Error(`HTTP ${response.status} ${detail}`);}
+    return await response.json();
+  }catch(err){if(err instanceof TypeError)throw new Error(`API 연결 실패 (${API}). Vercel의 VITE_API_URL, Render의 ALLOWED_ORIGINS, 서버 로그를 확인하세요. 원인: ${err.message}`);throw err;}
+  finally{clearTimeout(id);}
 }
-function renderEvents(){
-  $('sideEvents').replaceChildren(...scenario.events.map(e=>createEventRow(e,true)));
-  $('eventTimeline').replaceChildren(...scenario.events.slice().sort((a,b)=>a.start-b.start).map(e=>createEventRow(e)));
-  $('eventCount').textContent=String(scenario.events.length);
-  $('modeTag').textContent=scenario.generation_mode==='openrouter_llm'?'LLM 생성':'랜덤 생성';
-}
-function renderDiagnosis(){
-  const parent=$('diagnosis');parent.replaceChildren();
-  const items=result.diagnosis.room_predictions.slice(0,7);
-  if(!items.length)parent.append(el('p','muted','탐지된 이상 징후가 없습니다.'));
-  for(const item of items){
-    const row=el('div','diagnosis-row');const left=el('div','');
-    left.append(el('strong','',config.rooms[item.room].name),el('small','',`${item.room} · ${item.missing.length?'누락: '+item.missing.join(', '):'센서값 기반 추론'}`));
-    const right=el('div','diagnosis-right');const kind=item.predicted_type==='normal'?'정상 또는 불확실':(config.event_types[item.predicted_type]?.name||item.predicted_type);
-    right.append(el('b','',kind),el('small','',`분류 점수 ${(item.confidence*100).toFixed(0)}%`));row.append(left,right);
-    row.addEventListener('click',()=>{selected=item.room;twin?.setSelected(selected);showRoom();});parent.append(row);
+function setPhase(n){for(let i=1;i<=3;i++){$(`step${i}`).classList.toggle('complete',i<n);$(`step${i}`).classList.toggle('current',i===n);}}
+function severityCell(n){const s=text('span','','severity'+(n>=4?' high':''));for(let i=0;i<5;i++)s.append(text('i','',''+(i<n?'on':'')));return s;}
+function eventRows(){
+  const body=$('eventRows');clear(body);
+  for(const e of [...scenario.events].sort((a,b)=>a.start-b.start)){
+    const tr=document.createElement('tr');tr.dataset.room=e.room;
+    tr.append(text('td',`T+${String(e.start).padStart(2,'0')}:00`),text('td',`${e.emoji} ${e.name}`,'event-name'),
+      text('td',`${e.building} / ${e.room_name}`,'location'));
+    const sev=document.createElement('td');sev.append(severityCell(e.severity),text('small',` ${e.severity}/5`));tr.append(sev,text('td',`${e.duration}분`));
+    tr.addEventListener('click',()=>{selected=e.room;twin?.setSelected(selected);renderRoom();document.getElementById('visual').scrollIntoView({behavior:'smooth'});});body.append(tr);
   }
-  const ev=result.diagnosis.evaluation;
-  $('mlScore').textContent=`합성 데이터 홀드아웃: 정확도 ${(ev.accuracy*100).toFixed(1)}% · Macro-F1 ${ev.macro_f1} · ${ev.classes}개 클래스 (실제 현장 성능 아님)`;
+  $('briefMeta').replaceChildren(...[
+    ['MISSION STATUS','사건 브리핑 완료'],['EVENTS',`${scenario.events.length}건`],['TIME WINDOW',`${scenario.steps} MIN`],
+    ['GENERATION',scenario.generation_mode==='openrouter_llm'?'OPENROUTER AI':'절차적 난수']
+  ].map(([a,b])=>{const div=document.createElement('div');div.append(text('small',a),text('b',b));return div;}));
+  $('scenarioSeed').textContent=`SEED ${scenario.seed}`;
+  $('scenarioHint').textContent='모든 사건을 확인한 뒤 시뮬레이션 시작 버튼을 누르세요.';
+  $('startBtn').disabled=false;setPhase(2);
 }
-function renderStrategies(){
-  const p=$('strategies');p.replaceChildren();const max=Math.max(1,...result.comparisons.map(x=>x.score));
-  for(const item of result.comparisons){
-    const row=el('div','strategy-row');row.append(el('span','',item.name));
-    const track=el('div','track');const bar=el('div','bar');bar.style.width=`${item.score/max*100}%`;if(item.strategy===result.recommendation.strategy)bar.classList.add('best');track.append(bar);
-    row.append(track,el('b','',item.score.toFixed(2)));p.append(row);
+function stop(){if(timer){clearInterval(timer);timer=null;}$('playBtn').textContent='▶ 재생';}
+function frame(){return mission?.policies?.[policy]?.history?.[minute]||null;}
+function renderRoom(){
+  if(!config)return;const r=config.rooms[selected];if(!r)return;
+  $('roomTitle').textContent=r.name;$('roomSubtitle').textContent=`${r.building} · ${selected}`;
+  const p=$('roomStats');clear(p);const zone=frame()?.zones?.[selected];
+  if(zone){for(const [key,label] of Object.entries(names)){const d=text('div','','inspect-stat');d.append(text('small',label),text('strong',`${zone[key]}${key==='temperature'?'°':'%'}`));p.append(d);}}
+  else{p.append(text('div','시뮬레이션 전 — 정상 상태','empty'));}
+  const related=scenario?.events?.filter(e=>e.room===selected)||[];
+  $('roomEvents').textContent=related.length?`예정된 사건: ${related.map(e=>`${e.name} (T+${e.start}분, 강도 ${e.severity})`).join(' / ')}`:'해당 구역의 직접 발생 예정 사고 없음';
+}
+function updateFrame(){
+  const f=frame();if(!f)return;
+  $('riskMetric').textContent=f.risk.toFixed(2);
+  $('criticalMetric').textContent=f.critical;
+  $('powerMetric').textContent=`${f.power.toFixed(1)}%`;
+  $('oxygenMetric').textContent=`${f.oxygen.toFixed(1)}%`;
+  $('budgetMetric').textContent=f.budget;
+  $('timeSlider').value=minute;$('timeLabel').textContent=`T+${String(minute).padStart(2,'0')}:00`;
+  twin?.setFrame(f);renderRoom();
+  const logs=mission.policies[policy].actions.filter(a=>a.minute<=minute);
+  $('decisionSummary').textContent=`${policyNames[policy]} · T+${minute}분까지 ${logs.length}회 대응 · 잔여 자원 ${f.budget}/150`;
+  const parent=$('actionLog');clear(parent);
+  if(!logs.length)parent.append(text('div','현재 시점까지 실행된 대응 없음','empty'));
+  for(const a of logs.slice(-18).reverse()){
+    const row=text('div','','action-row');const left=text('div','');left.append(text('strong',`${a.name} · ${config.rooms[a.room]?.name||a.room}`),text('small',a.reason));
+    const right=text('div','');right.append(text('b',`T+${a.minute} · −${a.cost}`),text('small',`잔여 ${a.remaining}`));row.append(left,right);
+    row.addEventListener('click',()=>{selected=a.room;minute=a.minute;stop();updateFrame();twin?.setSelected(selected);});parent.append(row);
   }
-  $('recommendation').textContent=`◈ 모의 최저 위험도 대응: ${result.recommendation.name} · 평균 위험도 ${result.recommendation.score.toFixed(2)}`;
 }
 function renderChart(){
-  const svg=$('riskChart');svg.replaceChildren();const ns='http://www.w3.org/2000/svg';
-  const history=result.history,max=Math.max(10,...history.map(x=>x.risk))*1.12;
-  const points=history.map((f,i)=>`${24+i*(476/(history.length-1))},${140-(f.risk/max)*120}`).join(' ');
-  const grid=document.createElementNS(ns,'path');grid.setAttribute('d','M24 20 H500 M24 80 H500 M24 140 H500');grid.setAttribute('stroke','#25475b');grid.setAttribute('stroke-dasharray','3 6');svg.append(grid);
-  const line=document.createElementNS(ns,'polyline');line.setAttribute('points',points);line.setAttribute('fill','none');line.setAttribute('stroke','#47e5d3');line.setAttribute('stroke-width','3');line.setAttribute('stroke-linecap','round');line.setAttribute('stroke-linejoin','round');svg.append(line);
-  const x=24+minute*476/(history.length-1),y=140-(history[minute].risk/max)*120;
-  const dot=document.createElementNS(ns,'circle');dot.setAttribute('cx',String(x));dot.setAttribute('cy',String(y));dot.setAttribute('r','5');dot.setAttribute('fill','#ffc86c');svg.append(dot);
-  for(const [xPos,label] of [[24,'0분'],[262,'15분'],[476,'30분']]){const txt=document.createElementNS(ns,'text');txt.setAttribute('x',String(xPos));txt.setAttribute('y','157');txt.setAttribute('fill','#7a9bad');txt.setAttribute('font-size','10');txt.textContent=label;svg.append(txt);}
-}
-function showRoom(){
-  if(!config)return;
-  const room=config.rooms[selected];
-  if(!room)return;
-  if(!result){$('roomInfo').textContent=`선택 구역: ${room.building} / ${room.name} · 시뮬레이션 시작 전`;return;}
-  const values=result.history[minute].zones[selected];
-  const root=$('roomInfo');root.replaceChildren();
-  const title=el('strong','',`${room.building} / ${room.name}`);root.append(title);
-  const metrics=el('div','room-metrics');
-  for(const key of ['water','power','oxygen','temperature','pressure','air_quality','integrity','comms'])metrics.append(el('span','',`${LABELS[key]} ${values[key]}${key==='temperature'?'°C':'%'}`));
-  root.append(metrics);
-}
-function renderBuildings(){
-  const p=$('buildingGrid');p.replaceChildren();const frame=result.history[minute];
-  for(const b of config.buildings){
-    const card=el('div','building-card');card.append(el('h3','',b.name));
-    for(const [id,room] of Object.entries(config.rooms)){
-      if(room.building_id!==b.id)continue;
-      const state=frame.zones[id],r=el('button',`room-line ${state.risk>=20?'danger':state.risk>=8?'warning':''}`);
-      r.append(el('span','',room.name),el('b','',`${state.risk.toFixed(1)} 위험`));
-      r.addEventListener('click',()=>{selected=id;twin?.setSelected(selected);showRoom();});card.append(r);
-    }
-    p.append(card);
+  const svg=$('riskChart');clear(svg);if(!mission)return;
+  const ns='http://www.w3.org/2000/svg',make=(name,attrs)=>{const el=document.createElementNS(ns,name);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,v);svg.append(el);return el;};
+  const colors={ml:'#53ead4',rules:'#f7bc69',none:'#e77387'};
+  const max=Math.max(8,...Object.values(mission.policies).flatMap(p=>p.history.map(f=>f.risk)))*1.13;
+  for(let i=0;i<=4;i++){
+    const y=215-i*45;make('line',{x1:35,y1:y,x2:625,y2:y,stroke:'#294759','stroke-dasharray':'4 6'});
+    const label=make('text',{x:2,y:y+4,fill:'#7795a7','font-size':11});label.textContent=(max*i/4).toFixed(0);
   }
-}
-function showMinute(value){
-  if(!result)return;
-  minute=Math.max(0,Math.min(result.history.length-1,Number(value)));
-  const f=result.history[minute];$('timeSlider').value=String(minute);$('timeLabel').textContent=fmtTime(minute);
-  $('riskMetric').textContent=f.risk.toFixed(1);$('powerMetric').textContent=`${f.power.toFixed(1)}%`;
-  $('oxygenMetric').textContent=`${f.oxygen.toFixed(1)}%`;$('criticalMetric').textContent=`${f.critical} / 30`;
-  $('minuteMetric').textContent=`${minute}분`;
-  twin?.setFrame(f);showRoom();renderBuildings();renderChart();
-  for(const [i,node] of [...$('eventTimeline').children].entries()){
-    const ev=scenario.events.slice().sort((a,b)=>a.start-b.start)[i];
-    node.classList.toggle('active',ev.start<=minute&&minute<ev.start+ev.duration);
+  for(const key of ['none','rules','ml']){
+    const history=mission.policies[key].history;
+    const points=history.map((f,i)=>`${35+i*590/30},${215-f.risk/max*180}`).join(' ');
+    make('polyline',{points,fill:'none',stroke:colors[key],'stroke-width':key==='ml'?3.5:2.3,'stroke-linecap':'round','stroke-linejoin':'round'});
   }
+  const x=35+minute*590/30;make('line',{x1:x,x2:x,y1:24,y2:215,stroke:'#aac9d0','stroke-width':1,'stroke-dasharray':'3 5'});
+  for(let t=0;t<=30;t+=10){const label=make('text',{x:35+t*590/30,y:237,'text-anchor':'middle',fill:'#7795a7','font-size':11});label.textContent=`${t}분`;}
 }
-function stopPlay(){if(playTimer){clearInterval(playTimer);playTimer=null;}$('playBtn').textContent='▶ 재생';}
-function play(){
-  if(playTimer){stopPlay();return;}
-  if(!result)return;
-  if(minute>=result.history.length-1)showMinute(0);
-  $('playBtn').textContent='Ⅱ 일시정지';
-  playTimer=setInterval(()=>{if(minute>=result.history.length-1){stopPlay();return;}showMinute(minute+1);},550);
-}
-function renderScenarioBrief(){
-  const events=scenario.events.slice().sort((a,b)=>a.start-b.start);
-  const grid=$('scenarioGrid');grid.replaceChildren();
-  for(const [index,event] of events.entries()){
-    const card=el('button','brief-card');card.type='button';
-    const top=el('div','brief-card-top');top.append(el('span','brief-index',`사고 ${String(index+1).padStart(2,'0')}`),el('span','brief-clock',`T+${event.start}분`));
-    const name=el('strong','brief-name',`${event.emoji} ${event.name}`);
-    const where=el('div','brief-location',`${event.building} / ${event.room_name}`);
-    const severity=el('div','brief-severity');severity.append(el('span','',`강도 ${event.severity}/5`));
-    const bars=el('span','severity-bars');
-    for(let n=1;n<=5;n++)bars.append(el('i',n<=event.severity?(event.severity>=4?'hot':'filled'):''));
-    severity.append(bars);card.append(top,name,where,severity);
-    card.addEventListener('click',()=>{selected=event.room;twin?.setSelected(selected);showRoom();
-      for(const item of grid.children)item.classList.toggle('selected',item===card);});
-    grid.append(card);
+function renderCompare(){
+  const parent=$('comparison');clear(parent);if(!mission)return;
+  const policies=mission.policies,max=Math.max(1,...Object.values(policies).map(p=>p.score));
+  for(const key of ['ml','rules','none']){
+    const p=policies[key],d=text('div','','compare-card'),head=text('div','','compare-head');
+    head.append(text('strong',policyNames[key]),text('b',`${p.score.toFixed(2)} 위험도`));d.append(head);
+    const track=text('div','','compare-track'),bar=text('div','','compare-bar '+(key==='ml'?'':key));bar.style.width=`${p.score/max*100}%`;track.append(bar);d.append(track);
+    d.append(text('small',`대응 ${p.actions.length}회 · 자원 ${p.resources_used}/150 · 위험 구역-분 ${p.critical_minutes}`));parent.append(d);
   }
-  const high=events.filter(e=>e.severity>=4).length;
-  $('scenarioSummary').replaceChildren(
-    el('span','summary-pill',`전체 ${events.length}건`),
-    el('span','summary-pill',`${new Set(events.map(e=>e.building)).size}개 건물 영향`),
-    el('span','summary-pill',`고강도 사고 ${high}건`),
-    el('span','summary-pill',scenario.generation_mode==='openrouter_llm'?'OpenRouter AI 생성':'알고리즘 랜덤 생성')
-  );
-  $('phaseChip').textContent='2 / 3 · 사고 확인';
-  $('scenarioHint').textContent='전체 사고를 확인한 뒤 시작 버튼을 눌러주세요.';
-  $('startBtn').disabled=false;$('startInlineBtn').disabled=false;
+  const best=Object.entries(policies).sort((a,b)=>a[1].score-b[1].score)[0][0];
+  parent.append(text('div',`이번 시나리오 최저 위험도: ${policyNames[best]}. 결과는 시나리오마다 달라질 수 있습니다.`,'decision-summary'));
 }
-async function generate(){
-  stopPlay();result=null;scenario=null;minute=0;twin?.setScenario([]);
-  $('generateBtn').disabled=true;$('generateBtn').textContent='사고 시나리오 생성 중…';
-  $('startBtn').disabled=true;$('startInlineBtn').disabled=true;
-  $('playBtn').disabled=true;$('reportBtn').disabled=true;
-  $('scenarioGrid').replaceChildren(el('p','muted','사고 종류·위치·강도를 결정하는 중…'));
-  $('scenarioSummary').textContent='시나리오 생성 중';
-  $('phaseChip').textContent='1 / 3 · 생성 중';
-  $('diagnosis').replaceChildren();$('strategies').replaceChildren();$('recommendation').textContent='시뮬레이션 시작 후 표시됩니다.';
-  $('report').textContent='시뮬레이션을 실행한 후 보고서를 생성할 수 있습니다.';
-  $('riskChart').replaceChildren();$('timeSlider').value='0';$('timeLabel').textContent='00:00';
-  for(const id of ['riskMetric','powerMetric','oxygenMetric','criticalMetric','minuteMetric'])$(id).textContent='—';
-  setStatus('사고 시나리오 생성 중');clearError();
-  try{
-    scenario=await request('/api/scenario',{});
-    twin?.setScenario(scenario.events);renderEvents();renderScenarioBrief();showRoom();
-    setStatus(`${scenario.events.length}건 생성 완료 · 시작 대기`);
-  }catch(e){error(`시나리오 생성 실패: ${e.message}. Render 주소 및 CORS 설정을 확인하세요.`);
-    $('phaseChip').textContent='연결 오류';}
-  finally{$('generateBtn').disabled=false;$('generateBtn').textContent='✦ 새 AI 사고 시나리오 생성';}
+function renderDiagnosis(){
+  const parent=$('diagnosis');clear(parent);if(!mission)return;
+  $('sensorSummary').textContent=`센서 고장 주입 ${mission.sensor_faults_for_evaluation}개 모듈 · 관측 센서 기반 ML 분류 (정답 사건 목록 비공개)`;
+  const items=mission.diagnosis.room_predictions.slice(0,8);
+  for(const item of items){const d=text('div','','diagnosis-row'),left=text('div',''),right=text('div','');
+    left.append(text('strong',config.rooms[item.room]?.name||item.room),text('small',`${item.room} · 누락 ${item.missing?.length||0}개`));
+    right.append(text('b',config.event_types[item.predicted_type]?.name||item.predicted_type),text('small',`분류 점수 ${(item.confidence*100).toFixed(0)}%`));d.append(left,right);
+    d.addEventListener('click',()=>{selected=item.room;twin?.setSelected(selected);renderRoom();});parent.append(d);
+  }
+  if(!items.length)parent.append(text('div','탐지된 이상 패턴 없음','empty'));
+  const e=mission.diagnosis.evaluation;
+  $('mlScore').textContent=`합성 데이터 홀드아웃 정확도 ${(e.accuracy*100).toFixed(1)}% · Macro-F1 ${e.macro_f1}. 모델 분류 점수는 실제 사고 확률이 아닙니다.`;
 }
-async function startSimulation(){
-  if(!scenario)return;
-  stopPlay();$('startBtn').disabled=true;$('startInlineBtn').disabled=true;
-  $('startBtn').textContent='계산 중…';$('startInlineBtn').textContent='시뮬레이션 계산 중…';
-  setStatus('시뮬레이션 및 AI 진단 계산 중');clearError();
-  try{
-    result=await request('/api/simulate',{seed:scenario.seed,events:scenario.events});
-    renderDiagnosis();renderStrategies();showMinute(0);
-    $('phaseChip').textContent='3 / 3 · 시뮬레이션 진행';
-    $('scenarioHint').textContent='사고를 확인한 뒤 재생·일시정지·시간 이동이 가능합니다.';
-    $('playBtn').disabled=false;$('reportBtn').disabled=false;
-    setStatus('시뮬레이션 실행 중');
-    play();
-  }catch(e){error(`시뮬레이션 실패: ${e.message}`);
-    $('startBtn').disabled=false;$('startInlineBtn').disabled=false;}
-  finally{$('startBtn').textContent='▶ 시뮬레이션 시작';$('startInlineBtn').textContent='▶ 이 시나리오로 시뮬레이션 시작';}
+function setPolicy(next){if(!mission)return;policy=next;document.querySelectorAll('#policySwitch button').forEach(b=>b.classList.toggle('selected',b.dataset.policy===next));updateFrame();renderChart();}
+async function generate(){if(loading)return;loading=true;stop();hideError();$('generateBtn').disabled=true;$('generateBtn').textContent='생성 중…';$('startBtn').disabled=true;scenario=null;mission=null;setPhase(1);$('benchmarkResults').classList.add('hidden');
+  try{scenario=await api('/api/scenario',{});eventRows();twin?.setScenario(scenario.events);$('report').textContent='시뮬레이션이 시작되면 보고서를 생성할 수 있습니다.';status('사고 브리핑 완료');
+  }catch(e){showError(`시나리오 생성 실패: ${e.message}`);}finally{loading=false;$('generateBtn').disabled=false;$('generateBtn').textContent='✦ 새로운 사건 생성';}
 }
-async function report(){
-  if(!result)return;
-  $('reportBtn').disabled=true;$('report').textContent='분석 보고서 작성 중…';
-  try{const response=await request('/api/report',{events:result.events,diagnosis:result.diagnosis,recommendation:result.recommendation,final:result.final});
-    $('report').textContent=`[${response.mode==='openrouter'?'OpenRouter AI':'오프라인 분석'}]\n${response.text}`;
-  }catch(e){$('report').textContent=`보고서 생성 오류: ${e.message}`;}
-  finally{$('reportBtn').disabled=false;}
+async function start(){if(loading||!scenario)return;loading=true;hideError();$('startBtn').disabled=true;$('startBtn').textContent='AI 지휘 계산 중…';
+  try{mission=await api('/api/mission',{seed:scenario.seed,events:scenario.events});policy='ml';minute=0;
+    document.querySelectorAll('#policySwitch button').forEach(b=>{b.disabled=false;b.classList.toggle('selected',b.dataset.policy==='ml');});
+    $('playBtn').disabled=false;$('timeSlider').disabled=false;$('benchmarkBtn').disabled=false;$('reportBtn').disabled=false;
+    setPhase(3);renderCompare();renderDiagnosis();updateFrame();renderChart();status('AI 지휘 시뮬레이션 준비 완료');play();
+  }catch(e){showError(`시뮬레이션 실패: ${e.message}`);}finally{loading=false;$('startBtn').disabled=false;$('startBtn').textContent='▶ AI 대응 시뮬레이션 시작';}
+}
+function play(){if(!mission)return;if(timer){stop();return;}if(minute>=30)minute=0;
+  $('playBtn').textContent='Ⅱ 일시정지';timer=setInterval(()=>{minute=Math.min(30,minute+1);updateFrame();renderChart();if(minute===30)stop();},Number($('speedSelect').value));
+}
+async function benchmark(){if(!scenario)return;$('benchmarkBtn').disabled=true;$('benchmarkBtn').textContent='여러 시나리오 계산 중…';
+  try{const r=await api(`/api/benchmark?runs=6&seed=${scenario.seed}`);const box=$('benchmarkResults');clear(box);box.classList.remove('hidden');
+    box.append(text('strong','6개 동일 조건 비교 실험 · 평균 위험도 (낮을수록 좋음)'));
+    const table=document.createElement('table'),head=document.createElement('tr');['정책','평균 위험도','최저 위험도 횟수'].forEach(x=>head.append(text('th',x)));table.append(head);
+    for(const p of ['ml','rules','none']){const tr=document.createElement('tr');tr.append(text('td',policyNames[p]),text('td',r.averages[p].toFixed(2)),text('td',`${r.wins[p]}/6`));table.append(tr);}box.append(table,text('small',r.limitations));
+  }catch(e){showError(`벤치마크 실행 실패: ${e.message}`);}finally{$('benchmarkBtn').disabled=false;$('benchmarkBtn').textContent='▦ 여러 시나리오 벤치마크';}
+}
+async function report(){if(!mission)return;$('reportBtn').disabled=true;$('report').textContent='보고서 생성 중…';
+  try{const r=await api('/api/report',{events:mission.events,diagnosis:mission.diagnosis,recommendation:{name:'센서 관측 기반 ML 지휘 (비교 실험 포함)'},final:mission.final});$('report').textContent=`[${r.mode==='openrouter'?'OpenRouter 생성':'오프라인 요약'}]\n\n${r.text}`;}
+  catch(e){$('report').textContent=`보고서 오류: ${e.message}`;}finally{$('reportBtn').disabled=false;}
 }
 async function init(){
-  $('generateBtn').addEventListener('click',generate);$('startBtn').addEventListener('click',startSimulation);$('startInlineBtn').addEventListener('click',startSimulation);$('playBtn').addEventListener('click',play);
-  $('timeSlider').addEventListener('input',e=>{stopPlay();showMinute(e.target.value);});
-  $('reportBtn').addEventListener('click',report);
-  try{config=await request('/api/config');
-    $('buildingCount').textContent=config.buildings.length;$('roomCount').textContent=Object.keys(config.rooms).length;
-    $('typeCount').textContent=Object.keys(config.event_types).length;
-    twin=createTwin($('twin3d'),config,id=>{selected=id;twin.setSelected(id);showRoom();});
-    setStatus('기지 연결 완료 · 시나리오 생성 대기');showRoom();
-  }catch(e){error(`초기 연결 오류: ${e.message}. Render 백엔드가 실행 중인지 확인하세요.`);}
+  $('generateBtn').addEventListener('click',generate);$('startBtn').addEventListener('click',start);
+  $('playBtn').addEventListener('click',play);$('timeSlider').addEventListener('input',e=>{stop();minute=Number(e.target.value);updateFrame();renderChart();});
+  $('speedSelect').addEventListener('change',()=>{if(timer){stop();play();}});
+  $('benchmarkBtn').addEventListener('click',benchmark);$('reportBtn').addEventListener('click',report);
+  $('resetCamera').addEventListener('click',()=>twin?.reset());
+  document.querySelectorAll('#policySwitch button').forEach(b=>b.addEventListener('click',()=>{stop();setPolicy(b.dataset.policy);}));
+  try{const health=await api('/api/health');if(!health.ok)throw new Error('health ok=false');
+    config=await api('/api/config');$('buildingCount').textContent=config.buildings.length;$('roomCount').textContent=Object.keys(config.rooms).length;$('typeCount').textContent=Object.keys(config.event_types).length;
+    twin=createTwin($('twin3d'),config,id=>{selected=id;renderRoom();});renderRoom();status(`백엔드 연결됨 · v${health.version}`);
+  }catch(e){showError(`초기 연결 오류: ${e.message}`);$('generateBtn').disabled=true;}
 }
 init();
