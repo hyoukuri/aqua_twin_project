@@ -1,97 +1,71 @@
-"""Two real supervised ML classifiers trained exclusively on synthetic sensor readings.
-No injected ground-truth fault labels or incident labels are included in model features.
-The test set measures performance on held-out data from the SAME generator, not reality.
+"""RandomForest trained on synthetic per-room sensor patterns (14 incident classes + normal).
+Evaluation is synthetic holdout only; not real-world accuracy or calibrated probabilities.
 """
 import random
-import threading
+from threading import Lock
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
-from .simulation import ZONES, INCIDENTS, simulate, sensors_from_frame
+from .simulation import METRICS, BASELINE, RANGES, EFFECTS, EVENTS, clamp
 
-SENSOR_NAMES = ('water','humidity','pressure','power')
-FAULTS = ('none','missing','stuck','spike')
-_lock = threading.Lock()
-_cache = None
+_lock=Lock();_bundle=None
 
+def feature(row):
+    return [float(row.get(k)) if row.get(k) is not None else float(BASELINE[k]) for k in METRICS]+[int(row.get(k) is None) for k in METRICS]
 
-def features(observation):
-    values = []
-    for zone in ZONES:
-        for name in SENSOR_NAMES:
-            reading = observation['zones'][zone][name]
-            values.extend([float(reading) if reading is not None else -1.,float(reading is None)])
-    oxygen = observation['oxygen']
-    values.extend([float(oxygen) if oxygen is not None else -1.,float(oxygen is None)])
-    return values
-
-
-def train(n=2000):
-    rng = random.Random(28112026)
-    X, incidents, faults = [], [], []
-    for i in range(n):
-        incident = INCIDENTS[i % len(INCIDENTS)]
-        fault = FAULTS[(i//len(INCIDENTS)) % len(FAULTS)]
-        origin = rng.choice(ZONES)
-        state = simulate(incident,origin,'none',rng.randint(5,20),rng.uniform(.35,1.5))['final']
-        observed = sensors_from_frame(state,incident,origin,fault,seed=9000+i)
-        X.append(features(observed))
-        incidents.append(incident)
-        faults.append(fault)
-    X = np.asarray(X,dtype=np.float32)
-    train_idx,test_idx = train_test_split(np.arange(n),test_size=.25,random_state=44,
-                                          stratify=np.array(incidents)+'_'+np.array(faults))
-    result = {'models':{},'evaluation':{}}
-    for label, y in [('incident',np.asarray(incidents)),('fault',np.asarray(faults))]:
-        model = RandomForestClassifier(n_estimators=100,max_depth=15,min_samples_leaf=2,
-                                       random_state=51,n_jobs=-1,class_weight='balanced_subsample')
-        model.fit(X[train_idx],y[train_idx])
-        predicted = model.predict(X[test_idx])
-        result['models'][label] = model
-        result['evaluation'][label] = {
-            'accuracy':round(float(accuracy_score(y[test_idx],predicted)),3),
-            'macro_f1':round(float(f1_score(y[test_idx],predicted,average='macro')),3),
-            'samples':n,'test_samples':len(test_idx)
-        }
-    return result
-
+def training_data(n_per_class=165):
+    rng=random.Random(70401);xs=[];ys=[]
+    for label in ['normal',*EVENTS]:
+        for _ in range(n_per_class):
+            row=dict(BASELINE)
+            if label!='normal':
+                intensity=rng.uniform(.5,1.8);elapsed=rng.uniform(2,11)
+                for k,delta in EFFECTS[label].items():
+                    row[k]+=delta*intensity*elapsed
+                if row['water']>22:row['power']-=(row['water']-22)*.07
+                if row['power']<60:row['oxygen']-=2.5
+            else:
+                for k in METRICS:row[k]+=rng.gauss(0,1.8)
+            for k in METRICS:row[k]=clamp(row[k]+rng.gauss(0,1.6),*RANGES[k])
+            if rng.random()<.12:
+                key=rng.choice(METRICS)
+                row[key]=None if rng.random()<.7 else BASELINE[key]
+            xs.append(feature(row));ys.append(label)
+    return np.asarray(xs,dtype=np.float32),np.asarray(ys)
 
 def get_model():
-    global _cache
+    global _bundle
     with _lock:
-        if _cache is None:
-            _cache = train()
-        return _cache
+        if _bundle is None:
+            X,y=training_data()
+            xt,xv,yt,yv=train_test_split(X,y,test_size=.22,random_state=20,stratify=y)
+            model=RandomForestClassifier(n_estimators=85,max_depth=15,min_samples_leaf=2,
+                                         n_jobs=-1,random_state=33,class_weight='balanced_subsample')
+            model.fit(xt,yt)
+            pred=model.predict(xv)
+            _bundle={'model':model,'evaluation':{'accuracy':round(float(accuracy_score(yv,pred)),3),
+                'macro_f1':round(float(f1_score(yv,pred,average='macro')),3),
+                'test_samples':len(yv),'classes':len(set(y))}}
+        return _bundle
 
-
-def predict(model, x):
-    probabilities = model.predict_proba([x])[0]
-    scores = {str(k):round(float(p),4) for k,p in zip(model.classes_,probabilities)}
-    top = max(scores,key=scores.get)
-    return top,scores[top],scores
-
-
-def diagnose(observation):
-    bundle = get_model()
-    x = features(observation)
-    incident,confidence,probs = predict(bundle['models']['incident'],x)
-    fault,fault_confidence,fault_probs = predict(bundle['models']['fault'],x)
-    warnings = []
-    for zone,readings in observation['zones'].items():
-        missing = [key for key,value in readings.items() if value is None]
-        if missing:
-            warnings.append(f'{zone}구역 데이터 누락: {", ".join(missing)}')
-        if readings['water'] is not None and readings['humidity'] is not None:
-            if readings['water'] < 10 and readings['humidity'] > 67:
-                warnings.append(f'{zone}구역 침수·습도 센서 불일치')
-    if observation['oxygen'] is None:
-        warnings.append('산소 센서 데이터 누락')
-    if fault != 'none' and fault_confidence >= .4:
-        warnings.append(f'학습 모델이 센서 오류 패턴을 추정: {fault} ({fault_confidence:.0%})')
-    return {
-        'predicted_incident':incident,'confidence':confidence,'probabilities':probs,
-        'predicted_fault':fault,'fault_confidence':fault_confidence,'fault_probabilities':fault_probs,
-        'sensor_warnings':warnings,'evaluation':bundle['evaluation'],
-        'caveat':'모델 확률은 교정된 실제 사고 확률이 아니며, 합성 데이터에만 검증되었습니다.'
-    }
+def diagnose(observed,top_n=12):
+    model=get_model()['model'];zones=observed['zones'];keys=list(zones)
+    x=np.asarray([feature(zones[z]) for z in keys],dtype=np.float32)
+    probabilities=model.predict_proba(x)
+    output=[]
+    for i,z in enumerate(keys):
+        row=zones[z]
+        anomaly=max(0,round(100*max(abs((row[k] if row[k] is not None else BASELINE[k])-BASELINE[k])/
+                                     (80 if k=='temperature' else 100) for k in METRICS),1))
+        missing=[k for k in METRICS if row[k] is None]
+        order=np.argsort(probabilities[i])[::-1]
+        winner=str(model.classes_[order[0]])
+        if winner!='normal' or missing or anomaly>=8:
+            output.append({'room':z,'predicted_type':winner,'confidence':round(float(probabilities[i][order[0]]),3),
+                'anomaly':anomaly,'missing':missing,'top2':[
+                    {'type':str(model.classes_[j]),'score':round(float(probabilities[i][j]),3)} for j in order[:2]]})
+    output.sort(key=lambda item:(item['anomaly'],item['confidence']),reverse=True)
+    return {'room_predictions':output[:top_n],
+            'suspicious_rooms':len(output),'evaluation':get_model()['evaluation'],
+            'note':'센서 관측값만으로 추론한 합성 데이터 학습 모델입니다. 실제 사고의 확률이나 정답을 보장하지 않습니다.'}

@@ -1,6 +1,6 @@
 {
-  "name": "aqua-twin-sensor-ai-web",
-  "version": "3.0.0",
+  "name": "aqua-twin-autonomous",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,10 +8,10 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0"
   },
-  "devDependencies": {
-    "vite": "^6.3.0"
-  },
   "dependencies": {
     "three": "^0.176.0"
+  },
+  "devDependencies": {
+    "vite": "^6.3.0"
   }
 }

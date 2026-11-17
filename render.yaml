@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: aqua-twin-ai-api
+    name: aqua-twin-autonomous-api
     runtime: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
@@ -10,4 +10,8 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.11
       - key: ALLOWED_ORIGINS
-        value: http://localhost:5173
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: openrouter/auto
