@@ -132,7 +132,7 @@ function renderScenarioBrief(){
   $('startBtn').disabled=false;$('startInlineBtn').disabled=false;
 }
 async function generate(){
-  stopPlay();result=null;scenario=null;minute=0;
+  stopPlay();result=null;scenario=null;minute=0;twin?.setScenario([]);
   $('generateBtn').disabled=true;$('generateBtn').textContent='사고 시나리오 생성 중…';
   $('startBtn').disabled=true;$('startInlineBtn').disabled=true;
   $('playBtn').disabled=true;$('reportBtn').disabled=true;
@@ -146,7 +146,7 @@ async function generate(){
   setStatus('사고 시나리오 생성 중');clearError();
   try{
     scenario=await request('/api/scenario',{});
-    renderEvents();renderScenarioBrief();showRoom();
+    twin?.setScenario(scenario.events);renderEvents();renderScenarioBrief();showRoom();
     setStatus(`${scenario.events.length}건 생성 완료 · 시작 대기`);
   }catch(e){error(`시나리오 생성 실패: ${e.message}. Render 주소 및 CORS 설정을 확인하세요.`);
     $('phaseChip').textContent='연결 오류';}

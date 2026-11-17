@@ -27,3 +27,10 @@
 @media(max-width:1450px){.scenario-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:980px){.scenario-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:550px){.scenario-grid{grid-template-columns:1fr}.scenario-heading{display:block}.phase-chip{margin-bottom:15px}.start-inline{width:100%}}
+
+/* 5.1: richer 3D stage and stronger visual hierarchy */
+.twin-panel{border-color:#2b5b70;background:linear-gradient(160deg,#102a3d,#071a2a)}
+.twin{height:560px;position:relative;background:#061522;border:1px solid #285b70;box-shadow:inset 0 0 80px #020b15,0 12px 35px #0002}
+.twin:after{content:'AQUA TWIN  /  DEEP SEA DIGITAL TWIN';position:absolute;left:18px;bottom:15px;pointer-events:none;font-size:10px;font-weight:800;letter-spacing:2px;color:#6da4b9;background:#071b2ac9;border:1px solid #2a5064;border-radius:5px;padding:8px 11px}
+.twin-panel .panel-header{margin-bottom:13px}
+@media(max-width:750px){.twin{height:370px}.twin:after{font-size:8px;letter-spacing:1px}}
