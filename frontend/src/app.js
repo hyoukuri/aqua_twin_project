@@ -103,19 +103,19 @@ function updateFrame(){
 function renderChart(){
   const svg=$('riskChart');clear(svg);if(!mission)return;
   const ns='http://www.w3.org/2000/svg',make=(name,attrs)=>{const el=document.createElementNS(ns,name);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,v);svg.append(el);return el;};
-  const colors={ml:'#53ead4',rules:'#f7bc69',none:'#e77387'};
+  const colors={ml:'#2866e9',rules:'#e7a53a',none:'#e16a7b'};
   const max=Math.max(8,...Object.values(mission.policies).flatMap(p=>p.history.map(f=>f.risk)))*1.13;
   for(let i=0;i<=4;i++){
-    const y=215-i*45;make('line',{x1:35,y1:y,x2:625,y2:y,stroke:'#294759','stroke-dasharray':'4 6'});
-    const label=make('text',{x:2,y:y+4,fill:'#7795a7','font-size':11});label.textContent=(max*i/4).toFixed(0);
+    const y=215-i*45;make('line',{x1:35,y1:y,x2:625,y2:y,stroke:'#e1e7ef','stroke-dasharray':'4 6'});
+    const label=make('text',{x:2,y:y+4,fill:'#7b899b','font-size':11});label.textContent=(max*i/4).toFixed(0);
   }
   for(const key of ['none','rules','ml']){
     const history=mission.policies[key].history;
     const points=history.map((f,i)=>`${35+i*590/30},${215-f.risk/max*180}`).join(' ');
     make('polyline',{points,fill:'none',stroke:colors[key],'stroke-width':key==='ml'?3.5:2.3,'stroke-linecap':'round','stroke-linejoin':'round'});
   }
-  const x=35+minute*590/30;make('line',{x1:x,x2:x,y1:24,y2:215,stroke:'#aac9d0','stroke-width':1,'stroke-dasharray':'3 5'});
-  for(let t=0;t<=30;t+=10){const label=make('text',{x:35+t*590/30,y:237,'text-anchor':'middle',fill:'#7795a7','font-size':11});label.textContent=`${t}분`;}
+  const x=35+minute*590/30;make('line',{x1:x,x2:x,y1:24,y2:215,stroke:'#7c91ac','stroke-width':1,'stroke-dasharray':'3 5'});
+  for(let t=0;t<=30;t+=10){const label=make('text',{x:35+t*590/30,y:237,'text-anchor':'middle',fill:'#7b899b','font-size':11});label.textContent=`${t}분`;}
 }
 function renderCompare(){
   const parent=$('comparison');clear(parent);if(!mission)return;
@@ -168,7 +168,19 @@ async function report(){if(!mission)return;$('reportBtn').disabled=true;$('repor
   try{const r=await api('/api/report',{events:mission.events,diagnosis:mission.diagnosis,recommendation:{name:'센서 관측 기반 ML 지휘 (비교 실험 포함)'},final:mission.final});$('report').textContent=`[${r.mode==='openrouter'?'OpenRouter 생성':'오프라인 요약'}]\n\n${r.text}`;}
   catch(e){$('report').textContent=`보고서 오류: ${e.message}`;}finally{$('reportBtn').disabled=false;}
 }
+function setupNavigation(){
+  const links=[...document.querySelectorAll('.rail-group a[href^="#"]')];
+  if(!('IntersectionObserver' in window))return;
+  const observer=new IntersectionObserver(entries=>{
+    const visible=entries.filter(e=>e.isIntersecting).sort((a,b)=>b.intersectionRatio-a.intersectionRatio);
+    if(!visible.length)return;
+    const id=visible[0].target.id;
+    links.forEach(link=>link.classList.toggle('is-active',link.getAttribute('href')==='#'+id));
+  },{rootMargin:'-12% 0px -55% 0px',threshold:[0,.1,.3]});
+  for(const link of links){const target=document.querySelector(link.getAttribute('href'));if(target)observer.observe(target);}
+}
 async function init(){
+  setupNavigation();
   $('generateBtn').addEventListener('click',generate);$('startBtn').addEventListener('click',start);
   $('playBtn').addEventListener('click',play);$('timeSlider').addEventListener('input',e=>{stop();minute=Number(e.target.value);updateFrame();renderChart();});
   $('speedSelect').addEventListener('change',()=>{if(timer){stop();play();}});
