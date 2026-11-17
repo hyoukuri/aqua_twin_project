@@ -29,18 +29,27 @@ export function createTwin(container,config,onSelect){
   const pipeMat=new THREE.MeshStandardMaterial({color:0x2c6678,metalness:.7,roughness:.3,emissive:0x083c4b});
   for(const [a,b] of config.links){
     const start=pos[a].clone().setY(-.08),end=pos[b].clone().setY(-.08),dir=end.clone().sub(start);
-    const mesh=new THREE.Mesh(new THREE.CylinderGeometry(.055,.055,dir.length(),8),pipeMat);
+    const mesh=new THREE.Mesh(new THREE.CylinderGeometry(.11,.11,dir.length(),10),pipeMat);
     mesh.position.copy(start).add(end).multiplyScalar(.5);
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir.normalize());scene.add(mesh);
   }
   for(const [id,room] of Object.entries(config.rooms)){
     const group=new THREE.Group();group.position.copy(pos[id]);scene.add(group);
-    const body=new THREE.Mesh(new THREE.BoxGeometry(1.04,.7,.92),new THREE.MeshPhysicalMaterial({color:0x24b6b7,metalness:.25,roughness:.35,transparent:true,opacity:.86}));
+    const variant=Number(id.split('-')[1]);
+    const geometry=variant===2?new THREE.CylinderGeometry(.59,.59,.76,12):new THREE.CylinderGeometry(.53,.53,.72,10);
+    const body=new THREE.Mesh(geometry,new THREE.MeshPhysicalMaterial({color:0x24b6b7,metalness:.52,roughness:.3,transparent:true,opacity:.94}));
+    const plinth=new THREE.Mesh(new THREE.CylinderGeometry(.66,.66,.13,14),new THREE.MeshStandardMaterial({color:0x173d52,metalness:.62,roughness:.34}));
+    plinth.position.y=-.43;group.add(plinth);
+    const roof=new THREE.Mesh(variant===2?new THREE.SphereGeometry(.53,12,8,0,Math.PI*2,0,Math.PI/2):new THREE.CylinderGeometry(.45,.56,.2,12),
+      new THREE.MeshStandardMaterial({color:0x367e94,metalness:.7,roughness:.25}));
+    roof.position.y=variant===2?.37:.44;group.add(roof);
+    const roofRing=new THREE.Mesh(new THREE.TorusGeometry(.55,.028,6,20),new THREE.MeshBasicMaterial({color:0x6ce9e0}));
+    roofRing.rotation.x=Math.PI/2;roofRing.position.y=.38;group.add(roofRing);
     body.userData.id=id;group.add(body);hitTargets.push(body);
     const edge=new THREE.LineSegments(new THREE.EdgesGeometry(body.geometry),new THREE.LineBasicMaterial({color:0x87e9f0}));group.add(edge);
-    const water=new THREE.Mesh(new THREE.BoxGeometry(.95,.02,.82),new THREE.MeshBasicMaterial({color:0x3a83ff,transparent:true,opacity:.7,depthWrite:false}));water.position.y=-.33;group.add(water);
-    const led=new THREE.Mesh(new THREE.SphereGeometry(.09,8,8),new THREE.MeshBasicMaterial({color:0x5bf5c2}));led.position.set(.43,.28,-.39);group.add(led);
-    const label=makeLabel(id.replace('B',''));label.position.y=.70;group.add(label);
+    const water=new THREE.Mesh(new THREE.CylinderGeometry(.48,.48,.02,12),new THREE.MeshBasicMaterial({color:0x3a83ff,transparent:true,opacity:.7,depthWrite:false}));water.position.y=-.32;group.add(water);
+    const led=new THREE.Mesh(new THREE.SphereGeometry(.09,8,8),new THREE.MeshBasicMaterial({color:0x5bf5c2}));led.position.set(.43,.48,-.32);group.add(led);
+    const label=makeLabel(id.replace('B',''));label.position.y=1.05;group.add(label);
     roomMeshes[id]={body,edge,water,led};
   }
   const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();
@@ -59,7 +68,7 @@ export function createTwin(container,config,onSelect){
       const v=frame?.zones?.[id];const risk=v?.risk??0;const water=v?.water??0;
       m.body.material.color.setHex(risk>20?0xf04f72:risk>8?0xf4b75b:0x29bfc0);
       m.led.material.color.setHex(risk>20?0xff5a79:risk>8?0xffc45b:0x5bf5c2);
-      const h=Math.max(.02,water/100*.66);m.water.scale.y=h/.02;m.water.position.y=-.34+h/2;
+      const h=Math.max(.02,water/100*.66);m.water.scale.y=h/.02;m.water.position.y=-.32+h/2;
     }
   }
   let running=true,raf=0;

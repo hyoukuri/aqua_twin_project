@@ -34,3 +34,24 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(r.status_code,200,r.text)
         self.assertTrue(r.json()['text'])
 if __name__=='__main__':unittest.main()
+
+class TwoStageTests(unittest.TestCase):
+    def test_scenario_then_simulate(self):
+        first = client.post('/api/scenario', json={'seed': 2048})
+        self.assertEqual(first.status_code, 200, first.text)
+        data = first.json()
+        self.assertIn('events', data)
+        self.assertNotIn('history', data)
+        self.assertTrue(3 <= len(data['events']) <= 7)
+        self.assertEqual([e['start'] for e in data['events']], sorted(e['start'] for e in data['events']))
+        second = client.post('/api/simulate', json={'seed': data['seed'], 'events': data['events']})
+        self.assertEqual(second.status_code, 200, second.text)
+        result = second.json()
+        self.assertEqual(len(result['history']), 31)
+        self.assertEqual([(e['type'],e['room'],e['severity'],e['start']) for e in result['events']],
+                         [(e['type'],e['room'],e['severity'],e['start']) for e in data['events']])
+    def test_invalid_simulation_rejected(self):
+        data = client.post('/api/scenario', json={'seed': 2048}).json()
+        data['events'][0]['severity'] = 999
+        bad = client.post('/api/simulate', json={'seed': data['seed'], 'events': data['events']})
+        self.assertEqual(bad.status_code, 422)

@@ -3,7 +3,7 @@ import { createTwin } from './twin3d.js';
 const API=(import.meta.env.VITE_API_URL||'http://localhost:8000').replace(/\/$/,'');
 const $=id=>document.getElementById(id);
 const LABELS={water:'침수',power:'전력',oxygen:'산소',temperature:'온도',pressure:'압력',air_quality:'공기 질',integrity:'구조 건전성',comms:'통신'};
-let config=null,result=null,twin=null,selected='B01-2',minute=0,playTimer=null;
+let config=null,result=null,scenario=null,twin=null,selected='B01-2',minute=0,playTimer=null;
 function setStatus(message,good=true){$('status').textContent=message;$('status').classList.toggle('bad',!good);}
 function error(message){$('error').textContent=message;$('error').classList.remove('hidden');setStatus('연결 오류',false);}
 function clearError(){$('error').classList.add('hidden');}
@@ -20,10 +20,10 @@ function createEventRow(event,compact=false){
   node.addEventListener('click',()=>{selected=event.room;twin?.setSelected(selected);showRoom();});return node;
 }
 function renderEvents(){
-  $('sideEvents').replaceChildren(...result.events.map(e=>createEventRow(e,true)));
-  $('eventTimeline').replaceChildren(...result.events.slice().sort((a,b)=>a.start-b.start).map(e=>createEventRow(e)));
-  $('eventCount').textContent=String(result.events.length);
-  $('modeTag').textContent=result.generation_mode==='openrouter_llm'?'OpenRouter 시나리오':'난수 기반 시나리오';
+  $('sideEvents').replaceChildren(...scenario.events.map(e=>createEventRow(e,true)));
+  $('eventTimeline').replaceChildren(...scenario.events.slice().sort((a,b)=>a.start-b.start).map(e=>createEventRow(e)));
+  $('eventCount').textContent=String(scenario.events.length);
+  $('modeTag').textContent=scenario.generation_mode==='openrouter_llm'?'LLM 생성':'랜덤 생성';
 }
 function renderDiagnosis(){
   const parent=$('diagnosis');parent.replaceChildren();
@@ -59,8 +59,11 @@ function renderChart(){
   for(const [xPos,label] of [[24,'0분'],[262,'15분'],[476,'30분']]){const txt=document.createElementNS(ns,'text');txt.setAttribute('x',String(xPos));txt.setAttribute('y','157');txt.setAttribute('fill','#7a9bad');txt.setAttribute('font-size','10');txt.textContent=label;svg.append(txt);}
 }
 function showRoom(){
-  if(!result||!config)return;
-  const room=config.rooms[selected];const values=result.history[minute].zones[selected];
+  if(!config)return;
+  const room=config.rooms[selected];
+  if(!room)return;
+  if(!result){$('roomInfo').textContent=`선택 구역: ${room.building} / ${room.name} · 시뮬레이션 시작 전`;return;}
+  const values=result.history[minute].zones[selected];
   const root=$('roomInfo');root.replaceChildren();
   const title=el('strong','',`${room.building} / ${room.name}`);root.append(title);
   const metrics=el('div','room-metrics');
@@ -89,7 +92,7 @@ function showMinute(value){
   $('minuteMetric').textContent=`${minute}분`;
   twin?.setFrame(f);showRoom();renderBuildings();renderChart();
   for(const [i,node] of [...$('eventTimeline').children].entries()){
-    const ev=result.events.slice().sort((a,b)=>a.start-b.start)[i];
+    const ev=scenario.events.slice().sort((a,b)=>a.start-b.start)[i];
     node.classList.toggle('active',ev.start<=minute&&minute<ev.start+ev.duration);
   }
 }
@@ -101,16 +104,70 @@ function play(){
   $('playBtn').textContent='Ⅱ 일시정지';
   playTimer=setInterval(()=>{if(minute>=result.history.length-1){stopPlay();return;}showMinute(minute+1);},550);
 }
+function renderScenarioBrief(){
+  const events=scenario.events.slice().sort((a,b)=>a.start-b.start);
+  const grid=$('scenarioGrid');grid.replaceChildren();
+  for(const [index,event] of events.entries()){
+    const card=el('button','brief-card');card.type='button';
+    const top=el('div','brief-card-top');top.append(el('span','brief-index',`사고 ${String(index+1).padStart(2,'0')}`),el('span','brief-clock',`T+${event.start}분`));
+    const name=el('strong','brief-name',`${event.emoji} ${event.name}`);
+    const where=el('div','brief-location',`${event.building} / ${event.room_name}`);
+    const severity=el('div','brief-severity');severity.append(el('span','',`강도 ${event.severity}/5`));
+    const bars=el('span','severity-bars');
+    for(let n=1;n<=5;n++)bars.append(el('i',n<=event.severity?(event.severity>=4?'hot':'filled'):''));
+    severity.append(bars);card.append(top,name,where,severity);
+    card.addEventListener('click',()=>{selected=event.room;twin?.setSelected(selected);showRoom();
+      for(const item of grid.children)item.classList.toggle('selected',item===card);});
+    grid.append(card);
+  }
+  const high=events.filter(e=>e.severity>=4).length;
+  $('scenarioSummary').replaceChildren(
+    el('span','summary-pill',`전체 ${events.length}건`),
+    el('span','summary-pill',`${new Set(events.map(e=>e.building)).size}개 건물 영향`),
+    el('span','summary-pill',`고강도 사고 ${high}건`),
+    el('span','summary-pill',scenario.generation_mode==='openrouter_llm'?'OpenRouter AI 생성':'알고리즘 랜덤 생성')
+  );
+  $('phaseChip').textContent='2 / 3 · 사고 확인';
+  $('scenarioHint').textContent='전체 사고를 확인한 뒤 시작 버튼을 눌러주세요.';
+  $('startBtn').disabled=false;$('startInlineBtn').disabled=false;
+}
 async function generate(){
-  stopPlay();$('generateBtn').disabled=true;$('generateBtn').textContent='시나리오 생성 중…';setStatus('AI 분석 중');clearError();
+  stopPlay();result=null;scenario=null;minute=0;
+  $('generateBtn').disabled=true;$('generateBtn').textContent='사고 시나리오 생성 중…';
+  $('startBtn').disabled=true;$('startInlineBtn').disabled=true;
+  $('playBtn').disabled=true;$('reportBtn').disabled=true;
+  $('scenarioGrid').replaceChildren(el('p','muted','사고 종류·위치·강도를 결정하는 중…'));
+  $('scenarioSummary').textContent='시나리오 생성 중';
+  $('phaseChip').textContent='1 / 3 · 생성 중';
+  $('diagnosis').replaceChildren();$('strategies').replaceChildren();$('recommendation').textContent='시뮬레이션 시작 후 표시됩니다.';
+  $('report').textContent='시뮬레이션을 실행한 후 보고서를 생성할 수 있습니다.';
+  $('riskChart').replaceChildren();$('timeSlider').value='0';$('timeLabel').textContent='00:00';
+  for(const id of ['riskMetric','powerMetric','oxygenMetric','criticalMetric','minuteMetric'])$(id).textContent='—';
+  setStatus('사고 시나리오 생성 중');clearError();
   try{
-    result=await request('/api/generate',{});
-    $('report').textContent='「AI 상황 보고서 생성」을 누르면 사고 분석 보고서를 확인할 수 있습니다.';
-    renderEvents();renderDiagnosis();renderStrategies();showMinute(0);
-    setStatus(`${result.events.length}건의 사고 시뮬레이션 준비 완료`);
+    scenario=await request('/api/scenario',{});
+    renderEvents();renderScenarioBrief();showRoom();
+    setStatus(`${scenario.events.length}건 생성 완료 · 시작 대기`);
+  }catch(e){error(`시나리오 생성 실패: ${e.message}. Render 주소 및 CORS 설정을 확인하세요.`);
+    $('phaseChip').textContent='연결 오류';}
+  finally{$('generateBtn').disabled=false;$('generateBtn').textContent='✦ 새 AI 사고 시나리오 생성';}
+}
+async function startSimulation(){
+  if(!scenario)return;
+  stopPlay();$('startBtn').disabled=true;$('startInlineBtn').disabled=true;
+  $('startBtn').textContent='계산 중…';$('startInlineBtn').textContent='시뮬레이션 계산 중…';
+  setStatus('시뮬레이션 및 AI 진단 계산 중');clearError();
+  try{
+    result=await request('/api/simulate',{seed:scenario.seed,events:scenario.events});
+    renderDiagnosis();renderStrategies();showMinute(0);
+    $('phaseChip').textContent='3 / 3 · 시뮬레이션 진행';
+    $('scenarioHint').textContent='사고를 확인한 뒤 재생·일시정지·시간 이동이 가능합니다.';
+    $('playBtn').disabled=false;$('reportBtn').disabled=false;
+    setStatus('시뮬레이션 실행 중');
     play();
-  }catch(e){error(`백엔드 연결에 실패했습니다. Render 서버 주소와 CORS 설정을 확인하세요. ${e.message}`);}
-  finally{$('generateBtn').disabled=false;$('generateBtn').textContent='✦ 새 AI 랜덤 시나리오 생성';}
+  }catch(e){error(`시뮬레이션 실패: ${e.message}`);
+    $('startBtn').disabled=false;$('startInlineBtn').disabled=false;}
+  finally{$('startBtn').textContent='▶ 시뮬레이션 시작';$('startInlineBtn').textContent='▶ 이 시나리오로 시뮬레이션 시작';}
 }
 async function report(){
   if(!result)return;
@@ -121,14 +178,14 @@ async function report(){
   finally{$('reportBtn').disabled=false;}
 }
 async function init(){
-  $('generateBtn').addEventListener('click',generate);$('playBtn').addEventListener('click',play);
+  $('generateBtn').addEventListener('click',generate);$('startBtn').addEventListener('click',startSimulation);$('startInlineBtn').addEventListener('click',startSimulation);$('playBtn').addEventListener('click',play);
   $('timeSlider').addEventListener('input',e=>{stopPlay();showMinute(e.target.value);});
   $('reportBtn').addEventListener('click',report);
   try{config=await request('/api/config');
     $('buildingCount').textContent=config.buildings.length;$('roomCount').textContent=Object.keys(config.rooms).length;
     $('typeCount').textContent=Object.keys(config.event_types).length;
     twin=createTwin($('twin3d'),config,id=>{selected=id;twin.setSelected(id);showRoom();});
-    await generate();
+    setStatus('기지 연결 완료 · 시나리오 생성 대기');showRoom();
   }catch(e){error(`초기 연결 오류: ${e.message}. Render 백엔드가 실행 중인지 확인하세요.`);}
 }
 init();
