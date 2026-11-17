@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // Lightweight procedural habitat model. No remote assets, so Vercel needs no model hosting.
-const OCEAN=0x092636, AQUA=0x38d8d2, AMBER=0xffc46c, RED=0xff607e;
+const OCEAN=0x17485c, AQUA=0x55f5d7, AMBER=0xffcf4a, RED=0xff3557;
 const rand=(n)=>{const x=Math.sin(n*127.1+78.233)*43758.5453;return x-Math.floor(x);};
 const mat=(color,metalness=.45,roughness=.42,emissive=0x000000,emissiveIntensity=.15)=>new THREE.MeshStandardMaterial({color,metalness,roughness,emissive,emissiveIntensity});
 function mesh(geometry,material,parent,x=0,y=0,z=0){const m=new THREE.Mesh(geometry,material);m.position.set(x,y,z);parent.add(m);return m;}
@@ -26,21 +26,30 @@ export function createTwin(container,config,onSelect){
   try{renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,powerPreference:'high-performance'});}
   catch(e){container.textContent='WebGL 3D를 사용할 수 없습니다. 브라우저 하드웨어 가속을 확인해 주세요.';return {setFrame(){},setSelected(){},setScenario(){},reset(){},dispose(){}};}
   renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.65));
+  // Canvas backing pixels differ from CSS pixels on Retina/HiDPI screens.
+  // Without explicit CSS sizing the canvas can overflow the clipped viewport,
+  // making the base appear far down and to the right.
+  renderer.domElement.style.display='block';
+  renderer.domElement.style.width='100%';
+  renderer.domElement.style.height='100%';
   renderer.outputColorSpace=THREE.SRGBColorSpace;
   renderer.toneMapping=THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure=1.38;
+  renderer.toneMappingExposure=1.95;
   renderer.setClearColor(OCEAN,1);container.appendChild(renderer.domElement);
   const scene=new THREE.Scene();scene.background=new THREE.Color(OCEAN);
-  scene.fog=new THREE.FogExp2(0x103e50,.009);
-  const camera=new THREE.PerspectiveCamera(44,1,.1,180);camera.position.set(20,29,37);
+  scene.fog=new THREE.FogExp2(0x245f72,.0045);
+  const camera=new THREE.PerspectiveCamera(44,1,.1,260);
   const controls=new OrbitControls(camera,renderer.domElement);
-  controls.enableDamping=true;controls.dampingFactor=.065;controls.minDistance=5;controls.maxDistance=76;
-  controls.maxPolarAngle=Math.PI*.485;controls.target.set(0,0,0);
-  const homeTarget=new THREE.Vector3(0,0,0),targetPosition=new THREE.Vector3();
+  controls.enableDamping=true;controls.dampingFactor=.065;controls.minDistance=5;controls.maxDistance=140;
+  controls.maxPolarAngle=Math.PI*.485;
+  const homeTarget=new THREE.Vector3(0,1.0,0),targetPosition=new THREE.Vector3();
+  const homeDirection=new THREE.Vector3(.70,1.00,1.12).normalize();
+  let homeDistance=62;
+  controls.target.copy(homeTarget);
   let focusing=false;
-  scene.add(new THREE.HemisphereLight(0xb3f3ff,0x153043,2.65));
-  const key=new THREE.DirectionalLight(0xe0fbff,3.2);key.position.set(-13,26,19);scene.add(key);
-  const fill=new THREE.DirectionalLight(0x35b9cf,1.7);fill.position.set(24,12,-21);scene.add(fill);
+  scene.add(new THREE.HemisphereLight(0xe6fcff,0x3b6b7a,3.2));
+  const key=new THREE.DirectionalLight(0xffffff,4.3);key.position.set(-13,26,19);scene.add(key);
+  const fill=new THREE.DirectionalLight(0x80e8ff,2.3);fill.position.set(24,12,-21);scene.add(fill);
   // Uneven seabed, not a CAD grid. A faint platform grid is drawn above it.
   const terrainGeo=new THREE.PlaneGeometry(49,43,70,58);
   terrainGeo.rotateX(-Math.PI/2);
@@ -50,10 +59,10 @@ export function createTwin(container,config,onSelect){
     attr.setY(i,-1.25+Math.sin(x*.48)*.14+Math.cos(z*.55)*.11+Math.sin((x+z)*.28)*.12);
   }
   terrainGeo.computeVertexNormals();
-  mesh(terrainGeo,mat(0x163a46,.03,.96),scene,0,0,0);
-  const guide=new THREE.GridHelper(45,45,0x366575,0x204758);
-  guide.position.set(0,-.93,0);guide.material.transparent=true;guide.material.opacity=.15;scene.add(guide);
-  const rockMat=mat(0x294650,.08,.95), rockGeo=new THREE.DodecahedronGeometry(1,0);
+  mesh(terrainGeo,mat(0x386b78,.03,.89),scene,0,0,0);
+  const guide=new THREE.GridHelper(45,45,0x6296a1,0x3c7483);
+  guide.position.set(0,-.93,0);guide.material.transparent=true;guide.material.opacity=.25;scene.add(guide);
+  const rockMat=mat(0x547f88,.08,.90), rockGeo=new THREE.DodecahedronGeometry(1,0);
   for(let i=0;i<85;i++){
     const x=-25+rand(i*13+1)*50,z=-22+rand(i*13+2)*44;
     if(Math.hypot(x/1.2,z/1.0)<17)continue;
@@ -68,10 +77,10 @@ export function createTwin(container,config,onSelect){
     particlePositions[i*3+2]=-23+rand(i*3+302)*46;
   }
   const particleGeo=new THREE.BufferGeometry();particleGeo.setAttribute('position',new THREE.BufferAttribute(particlePositions,3));
-  const particles=new THREE.Points(particleGeo,new THREE.PointsMaterial({color:0x75d5e7,size:.055,transparent:true,opacity:.19,depthWrite:false}));scene.add(particles);
-  const hullMat=mat(0x3b7385,.78,.31),trimMat=mat(0x91b8c3,.82,.23),darkMat=mat(0x183449,.68,.36);
-  const glassMat=new THREE.MeshPhysicalMaterial({color:0x4dd3e8,metalness:.2,roughness:.12,transparent:true,opacity:.80,emissive:0x155269,emissiveIntensity:.48});
-  const conduitMat=mat(0x476c79,.75,.3),floorMat=mat(0x1a4051,.45,.55);
+  const particles=new THREE.Points(particleGeo,new THREE.PointsMaterial({color:0x75d5e7,size:.055,transparent:true,opacity:.12,depthWrite:false}));scene.add(particles);
+  const hullMat=mat(0x85b9c6,.58,.32),trimMat=mat(0xe5f5f7,.65,.22),darkMat=mat(0x315f73,.58,.36);
+  const glassMat=new THREE.MeshPhysicalMaterial({color:0x8ff4ff,metalness:.16,roughness:.12,transparent:true,opacity:.88,emissive:0x297f99,emissiveIntensity:.78});
+  const conduitMat=mat(0x91b9c5,.60,.30),floorMat=mat(0x38687b,.42,.50);
   const safeMat=new THREE.MeshStandardMaterial({color:AQUA,emissive:0x0b9e99,emissiveIntensity:.85,metalness:.2,roughness:.3});
   const pos={},modules={},hits=[],buildings={};
   for(const [id,r] of Object.entries(config.rooms))pos[id]=new THREE.Vector3(r.x,0,r.z);
@@ -109,7 +118,7 @@ export function createTwin(container,config,onSelect){
     // Raised foundation and segmented illuminated outer safety rail.
     mesh(new THREE.CylinderGeometry(.92,.98,.18,24),floorMat,g,0,-.67,0);
     mesh(new THREE.CylinderGeometry(.79,.85,.14,24),darkMat,g,0,-.52,0);
-    const haloMat=new THREE.MeshBasicMaterial({color:0x2c99a6,transparent:true,opacity:.22,depthWrite:false});
+    const haloMat=new THREE.MeshBasicMaterial({color:0x57e4f0,transparent:true,opacity:.36,depthWrite:false});
     const halo=mesh(new THREE.TorusGeometry(.91,.025,6,40),haloMat,g,0,-.56,0);halo.rotation.x=Math.PI/2;
     for(let i=0;i<4;i++){
       const angle=i*Math.PI/2;
@@ -170,8 +179,9 @@ export function createTwin(container,config,onSelect){
       }
     }
     // Restrained facility-specific hues avoid the uniform toy-block appearance.
-    const hullPalette=[0x4c8796,0x407987,0x687c92,0x4a8190,0x438d87,0x60899a,0x5a7c94,0x687e82,0x3c7f95,0x647b96];
+    const hullPalette=[0x9dd1dc,0x83c9d6,0xabbddc,0x88c7d7,0x7dd3c6,0xa1c7d9,0x8db5d3,0xa5c4c3,0x85c6e2,0xa3bdd6];
     body.material=hullMat.clone();body.material.color.setHex(hullPalette[buildingIndex]);
+    const baseHullColor=body.material.color.clone();
     body.userData.room=id;hits.push(body);
     // Decorative building-specific tops make groups recognizable at a glance.
     if(kind==='comms'||(kind==='command'&&variant!==2)){
@@ -189,11 +199,22 @@ export function createTwin(container,config,onSelect){
     const beacon=mesh(new THREE.SphereGeometry(.09,10,8),statusMat,g,.5,.62,.45);
     const water=mesh(new THREE.CylinderGeometry(.51,.51,.018,20),new THREE.MeshBasicMaterial({color:0x298fe8,transparent:true,opacity:.62,depthWrite:false}),g,0,-.38,0);
     const selection=mesh(new THREE.TorusGeometry(isHub?2.60:.97,.055,8,56),new THREE.MeshBasicMaterial({color:0xffd685,transparent:true,opacity:0,depthWrite:false}),g,0,-.48,0);selection.rotation.x=Math.PI/2;selection.position.y=isHub?-.73:-.48;
-    const alarm=mesh(new THREE.RingGeometry(isHub?2.62:.98,isHub?2.80:1.11,48),new THREE.MeshBasicMaterial({color:RED,side:THREE.DoubleSide,transparent:true,opacity:0,depthWrite:false}),g,0,-.47,0);alarm.rotation.x=-Math.PI/2;alarm.position.y=isHub?-.71:-.47;
+    const alarm=mesh(new THREE.RingGeometry(isHub?2.70:1.02,isHub?3.16:1.42,48),new THREE.MeshBasicMaterial({color:RED,side:THREE.DoubleSide,transparent:true,opacity:0,depthWrite:false}),g,0,-.47,0);alarm.rotation.x=-Math.PI/2;alarm.position.y=isHub?-.71:-.47;
     // Incident column provides spatial location cues without a full-screen effect.
-    const beam=mesh(new THREE.CylinderGeometry(.08,isHub?1.1:.42,isHub?4.2:2.7,16,1,true),new THREE.MeshBasicMaterial({color:0xffb65e,transparent:true,opacity:0,depthWrite:false,side:THREE.DoubleSide}),g,0,isHub?3.5:1.5,0);
-    const beaconLight=new THREE.PointLight(0xffa962,0,isHub?8:3.2,2);beaconLight.position.set(0,isHub?3.2:1.0,0);g.add(beaconLight);
-    modules[id]={g,status,beacon,water,selection,alarm,beam,beaconLight,statusMat,halo,body,risk:0};
+    const beam=mesh(new THREE.CylinderGeometry(.12,isHub?1.45:.74,isHub?6.0:4.4,16,1,true),new THREE.MeshBasicMaterial({color:RED,transparent:true,opacity:0,depthWrite:false,side:THREE.DoubleSide}),g,0,isHub?4.1:2.6,0);
+    const beaconLight=new THREE.PointLight(RED,0,isHub?12:7,1.4);beaconLight.position.set(0,isHub?3.6:1.7,0);g.add(beaconLight);
+    // High-contrast accident locator: visible even when a room is small on screen.
+    const locator=mesh(new THREE.ConeGeometry(isHub?.55:.39,isHub?1.15:.82,4),
+      new THREE.MeshBasicMaterial({color:RED,transparent:true,opacity:0,depthTest:false,depthWrite:false}),
+      g,0,isHub?6.65:3.75,0);
+    locator.rotation.z=Math.PI;
+    locator.renderOrder=90;
+    const markerLabel=label('사고',false);
+    markerLabel.position.set(0,isHub?8.15:5.08,0);
+    markerLabel.scale.set(isHub?3.1:2.7,.68,1);
+    markerLabel.material.depthTest=false;markerLabel.renderOrder=91;
+    markerLabel.visible=false;g.add(markerLabel);
+    modules[id]={g,status,beacon,water,selection,alarm,beam,beaconLight,locator,markerLabel,statusMat,halo,body,baseHullColor,risk:0};
     if(variant===2){
       const tag=label(r.building_id,true);tag.position.set(0,isHub?5.25:2.20,0);g.add(tag);
       buildings[r.building_id]=g;
@@ -203,15 +224,43 @@ export function createTwin(container,config,onSelect){
   let events=[],selected='B01-2',frameMinute=null,raf=0,running=true,elapsed=0;
   function updateVisuals(){
     for(const [id,m] of Object.entries(modules)){
-      const preview=events.some(e=>e.room===id);
-      const active=frameMinute!==null&&events.some(e=>e.room===id&&frameMinute>=e.start&&frameMinute<e.start+e.duration);
-      const risk=m.risk;
-      const color=risk>=20?RED:risk>=8?AMBER:preview&&frameMinute===null?AMBER:AQUA;
+      const scheduled=events.filter(e=>e.room===id);
+      const preview=frameMinute===null && scheduled.length>0;
+      const activeEvents=frameMinute===null?[]:scheduled.filter(e=>frameMinute>=e.start&&frameMinute<e.start+e.duration);
+      const active=activeEvents.length>0;
+      const danger=active || m.risk>=20;
+      const warning=preview || (!danger&&m.risk>=8);
+      const color=danger?RED:warning?AMBER:AQUA;
+      // Recolor the affected building itself, not just its thin status ring.
+      m.body.material.color.copy(m.baseHullColor);
+      if(danger)m.body.material.color.setHex(0xff536c);
+      else if(warning)m.body.material.color.setHex(0xffd36e);
+      m.body.material.emissive.setHex(danger?0xc91935:warning?0x9b5c00:0x000000);
+      m.body.material.emissiveIntensity=danger?1.3:warning?.8:0;
       m.statusMat.color.setHex(color);
-      m.statusMat.emissive.setHex(risk>=20?0xe13558:risk>=8||preview&&frameMinute===null?0xb27a24:0x0b9e99);
-      m.alarm.material.opacity=active?.32:risk>=20?.18:preview&&frameMinute===null?.15:0;
-      m.beam.material.opacity=active?.14:preview&&frameMinute===null?.07:0;
-      m.beaconLight.intensity=active?1.0:0;
+      m.statusMat.emissive.setHex(danger?0xff173e:warning?0xff9900:0x16b69b);
+      m.statusMat.emissiveIntensity=danger?3.3:warning?2.2:1.0;
+      m.alarm.material.color.setHex(color);
+      m.alarm.material.opacity=danger?.80:warning?.58:0;
+      m.beam.material.color.setHex(color);
+      m.beam.material.opacity=danger?.35:warning?.18:0;
+      m.beaconLight.color.setHex(color);
+      m.beaconLight.intensity=danger?4.5:warning?1.8:0;
+      m.locator.material.color.setHex(color);
+      m.locator.material.opacity=danger?1:warning?.92:0;
+      m.markerLabel.visible=danger||preview;
+      if(m.markerLabel.visible){
+        const incident=activeEvents[0]||scheduled[0];
+        const caption=active?`사고 발생 · ${incident?.name||id}`:preview?`발생 예정 · ${incident?.name||id}`:`위험 구역 · ${id}`;
+        if(m.markerLabel.userData.caption!==caption){
+          m.markerLabel.material.map?.dispose();
+          const newLabel=label(caption);
+          m.markerLabel.material.map=newLabel.material.map;
+          newLabel.material.map=null;newLabel.material.dispose();
+          m.markerLabel.material.needsUpdate=true;
+          m.markerLabel.userData.caption=caption;
+        }
+      }
     }
   }
   function setScenario(next){events=Array.isArray(next)?next:[];frameMinute=null;for(const m of Object.values(modules)){m.risk=0;m.water.scale.y=1;m.water.position.y=-.38;}updateVisuals();}
@@ -236,16 +285,34 @@ export function createTwin(container,config,onSelect){
     const ray=new THREE.Raycaster();ray.setFromCamera(mouse,camera);
     const hit=ray.intersectObjects(hits,false)[0];if(hit?.object?.userData?.room)onSelect(hit.object.userData.room);
   }
-  let startX=0,startY=0;
+  let startX=0,startY=0,hasInteracted=false;
   const down=e=>{startX=e.clientX;startY=e.clientY;};
   const up=e=>{if(Math.hypot(e.clientX-startX,e.clientY-startY)<5)onPointer(e);};
   renderer.domElement.addEventListener('pointerdown',down);
   renderer.domElement.addEventListener('pointerup',up);
-  controls.addEventListener('start',()=>{focusing=false;});
-  const resetCamera=()=>{focusing=false;controls.target.copy(homeTarget);camera.position.set(20,29,37);controls.update();};
+  controls.addEventListener('start',()=>{focusing=false;hasInteracted=true;});
+  const resetCamera=()=>{
+    focusing=false;
+    hasInteracted=false;
+    // Recenter both the camera AND OrbitControls' orbit target.
+    controls.target.copy(homeTarget);
+    camera.position.copy(homeTarget).addScaledVector(homeDirection,homeDistance);
+    controls.update();
+  };
   // Double click empty space to return to whole-base view.
   renderer.domElement.addEventListener('dblclick',resetCamera);
-  function resize(){const w=Math.max(280,container.clientWidth),h=Math.max(280,container.clientHeight);renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
+  function resize(){
+    const w=Math.max(280,container.clientWidth),h=Math.max(280,container.clientHeight);
+    renderer.setSize(w,h,false);
+    camera.aspect=w/h;
+    camera.updateProjectionMatrix();
+    // Fit the whole 10-building campus within the actual visible viewport.
+    const halfVerticalFov=THREE.MathUtils.degToRad(camera.fov*.5);
+    const halfHorizontalFov=Math.atan(Math.tan(halfVerticalFov)*camera.aspect);
+    const limitingHalfFov=Math.min(halfVerticalFov,halfHorizontalFov);
+    homeDistance=Math.max(50,20.5/Math.sin(limitingHalfFov)*1.12);
+    if(!focusing && !hasInteracted)resetCamera();
+  }
   const observer=new ResizeObserver(resize);observer.observe(container);resize();
   const clock=new THREE.Clock();
   function animate(){
@@ -260,9 +327,12 @@ export function createTwin(container,config,onSelect){
     }
     for(const [id,m] of Object.entries(modules)){
       const active=frameMinute!==null&&events.some(e=>e.room===id&&frameMinute>=e.start&&frameMinute<e.start+e.duration);
-      if(active){m.alarm.material.opacity=.23+.22*(.5+.5*Math.sin(elapsed*5));
-        m.beam.material.opacity=.11+.08*(.5+.5*Math.sin(elapsed*3.7));
-        m.beaconLight.intensity=.8+.5*Math.sin(elapsed*4);
+      if(active){
+        const pulse=.5+.5*Math.sin(elapsed*5);
+        m.alarm.material.opacity=.60+.30*pulse;
+        m.beam.material.opacity=.20+.18*pulse;
+        m.beaconLight.intensity=3.2+2.4*pulse;
+        m.locator.rotation.y=elapsed*.75;
       }
       if(id===selected)m.selection.material.opacity=.65+.30*(.5+.5*Math.sin(elapsed*2.5));
     }
