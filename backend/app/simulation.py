@@ -2,6 +2,7 @@
 All parameters are educational, NOT calibrated engineering/safety physics.
 """
 import random
+import math
 from collections import deque
 
 BUILDINGS = [
@@ -22,20 +23,39 @@ ROOM_NAMES = [
     ['안테나 제어실','항법 센터','외부 통신실'],
     ['비상 발전실','구명 설비실','재난 지휘실']
 ]
+# Architectural layout: one monumental central command building and nine
+# distinct satellite buildings around a clear, readable circular campus.
+# Room IDs and event semantics remain stable for existing scenarios.
 ROOMS = {}
-for i,(bid,bname) in enumerate(BUILDINGS):
-    for j,name in enumerate(ROOM_NAMES[i]):
-        rid=f'{bid}-{j+1}'
-        ROOMS[rid]={'id':rid,'name':name,'building_id':bid,'building':bname,
-                    'x':(i%5)*5.8+(1.5 if i>=5 else 0)+(-1.3 if j==0 else 1.3 if j==2 else 0),
-                    'z':(i//5)*7.1+(.6 if i%2==0 else -.4)+(-.65 if j!=1 else .4)}
-ROOM_IDS=list(ROOMS)
-LINKS=[]
-for bid,_ in BUILDINGS:
-    LINKS += [[f'{bid}-1',f'{bid}-2'],[f'{bid}-2',f'{bid}-3']]
-for i,(bid,_) in enumerate(BUILDINGS):
-    if i%5<4: LINKS.append([f'{bid}-2',f'{BUILDINGS[i+1][0]}-2'])
-    if i<5: LINKS.append([f'{bid}-2',f'{BUILDINGS[i+5][0]}-2'])
+SATELLITE_COUNT = len(BUILDINGS) - 1
+for i, (bid, bname) in enumerate(BUILDINGS):
+    if i == 0:
+        # The three central command rooms form one connected landmark complex.
+        room_positions = [(-2.85, 0.65), (0.0, 0.0), (2.85, 0.65)]
+    else:
+        theta = 2 * math.pi * (i - 1) / SATELLITE_COUNT - math.pi / 2
+        cx, cz = 14.2 * math.cos(theta), 11.4 * math.sin(theta)
+        tx, tz = -math.sin(theta), math.cos(theta)  # tangent direction
+        room_positions = [
+            (cx - 1.55 * tx, cz - 1.55 * tz),
+            (cx, cz),
+            (cx + 1.55 * tx, cz + 1.55 * tz),
+        ]
+    for j, name in enumerate(ROOM_NAMES[i]):
+        rid = f'{bid}-{j+1}'
+        x, z = room_positions[j]
+        ROOMS[rid] = {'id':rid, 'name':name, 'building_id':bid,
+                      'building':bname, 'x':round(x,3), 'z':round(z,3)}
+ROOM_IDS = list(ROOMS)
+LINKS = []
+# 20 intra-building passages, 9 perimeter connections and 4 central spokes.
+for bid, _ in BUILDINGS:
+    LINKS.extend([[f'{bid}-1',f'{bid}-2'], [f'{bid}-2',f'{bid}-3']])
+ring = [bid for bid, _ in BUILDINGS[1:]]
+for i, bid in enumerate(ring):
+    LINKS.append([f'{bid}-2', f'{ring[(i+1) % len(ring)]}-2'])
+for bid in ('B02','B04','B07','B09'):
+    LINKS.append(['B01-2',f'{bid}-2'])
 ADJ={z:set() for z in ROOM_IDS}
 for a,b in LINKS: ADJ[a].add(b);ADJ[b].add(a)
 
